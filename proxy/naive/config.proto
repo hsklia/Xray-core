@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package xray.proxy.naive;
+option csharp_namespace = "Xray.Proxy.Naive";
+option go_package = "github.com/xtls/xray-core/proxy/naive";
+option java_package = "com.xray.proxy.naive";
+option java_multiple_files = true;
+
+import "common/protocol/server_spec.proto";
+import "common/protocol/user.proto";
+
+message Account {
+  string password = 1;
+  // Basic-auth username. Empty means "use the account email", which is what
+  // every client saved before this field existed does. The email stays the
+  // accounting identity either way; see Validator in config.go.
+  string username = 2;
+}
+
+// Masquerade describes what the server answers with when a request is not a
+// valid proxy CONNECT. It mirrors the hysteria transport's masquerade config.
+message Masquerade {
+  string type = 1;
+  string file = 2;
+  string url = 3;
+  bool url_rewrite_host = 4;
+  bool url_insecure = 5;
+  string content = 6;
+  map<string, string> headers = 7;
+  int32 status_code = 8;
+}
+
+message ServerConfig {
+  repeated xray.common.protocol.User clients = 1;
+  // "tcp" (h2 only), "udp" (h3 only) or "tcp,udp" (both).
+  string network = 2;
+  Masquerade masquerade = 3;
+  // Realm advertised in the 407 Proxy-Authenticate challenge.
+  string realm = 4;
+}
+
+message ClientConfig {
+  xray.common.protocol.ServerEndpoint server = 1;
+  // "tcp" dials h2 over the configured stream settings, "udp" dials h3.
+  string network = 2;
+}

@@ -1015,6 +1015,10 @@ func (p TransportProtocol) Build() (string, error) {
 		return "", errors.PrintRemovedFeatureError("QUIC transport (without web service, etc.)", "XHTTP stream-one H3")
 	case "hysteria":
 		return "hysteria", nil
+	case "tuic":
+		return "tuic", nil
+	case "naive":
+		return "naive", nil
 	default:
 		return "", errors.New("Config: unknown transport protocol: ", p)
 	}
@@ -1935,23 +1939,24 @@ type FinalMask struct {
 }
 
 type StreamConfig struct {
-	Address             *Address           `json:"address"`
-	Port                uint16             `json:"port"`
-	Network             *TransportProtocol `json:"network"`
-	Security            string             `json:"security"`
-	FinalMask           *FinalMask         `json:"finalmask"`
-	TLSSettings         *TLSConfig         `json:"tlsSettings"`
-	REALITYSettings     *REALITYConfig     `json:"realitySettings"`
-	RAWSettings         *TCPConfig         `json:"rawSettings"`
-	TCPSettings         *TCPConfig         `json:"tcpSettings"`
-	XHTTPSettings       *SplitHTTPConfig   `json:"xhttpSettings"`
-	SplitHTTPSettings   *SplitHTTPConfig   `json:"splithttpSettings"`
-	KCPSettings         *KCPConfig         `json:"kcpSettings"`
-	GRPCSettings        *GRPCConfig        `json:"grpcSettings"`
-	WSSettings          *WebSocketConfig   `json:"wsSettings"`
-	HTTPUPGRADESettings *HttpUpgradeConfig `json:"httpupgradeSettings"`
-	HysteriaSettings    *HysteriaConfig    `json:"hysteriaSettings"`
-	SocketSettings      *SocketConfig      `json:"sockopt"`
+	Address             *Address              `json:"address"`
+	Port                uint16                `json:"port"`
+	Network             *TransportProtocol    `json:"network"`
+	Security            string                `json:"security"`
+	FinalMask           *FinalMask            `json:"finalmask"`
+	TLSSettings         *TLSConfig            `json:"tlsSettings"`
+	REALITYSettings     *REALITYConfig        `json:"realitySettings"`
+	RAWSettings         *TCPConfig            `json:"rawSettings"`
+	TCPSettings         *TCPConfig            `json:"tcpSettings"`
+	XHTTPSettings       *SplitHTTPConfig      `json:"xhttpSettings"`
+	SplitHTTPSettings   *SplitHTTPConfig      `json:"splithttpSettings"`
+	KCPSettings         *KCPConfig            `json:"kcpSettings"`
+	GRPCSettings        *GRPCConfig           `json:"grpcSettings"`
+	WSSettings          *WebSocketConfig      `json:"wsSettings"`
+	HTTPUPGRADESettings *HttpUpgradeConfig    `json:"httpupgradeSettings"`
+	HysteriaSettings    *HysteriaConfig       `json:"hysteriaSettings"`
+	NaiveSettings       *NaiveTransportConfig `json:"naiveSettings"`
+	SocketSettings      *SocketConfig         `json:"sockopt"`
 }
 
 // Build implements Buildable.
@@ -2079,6 +2084,20 @@ func (c *StreamConfig) Build() (*internet.StreamConfig, error) {
 		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
 			ProtocolName: "hysteria",
 			Settings:     serial.ToTypedMessage(hs),
+		})
+	}
+	if config.ProtocolName == "naive" {
+		naiveSettings := c.NaiveSettings
+		if naiveSettings == nil {
+			naiveSettings = &NaiveTransportConfig{}
+		}
+		ns, err := naiveSettings.Build()
+		if err != nil {
+			return nil, errors.New("Failed to build naive config.").Base(err)
+		}
+		config.TransportSettings = append(config.TransportSettings, &internet.TransportConfig{
+			ProtocolName: "naive",
+			Settings:     serial.ToTypedMessage(ns),
 		})
 	}
 	if c.SocketSettings != nil {

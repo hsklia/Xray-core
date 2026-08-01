@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package xray.transport.internet.naive;
+option csharp_namespace = "Xray.Transport.Internet.Naive";
+option go_package = "github.com/xtls/xray-core/transport/internet/naive";
+option java_package = "com.xray.transport.internet.naive";
+option java_multiple_files = true;
+
+message Config {
+  // "tcp" (TLS + h1/h2), "udp" (QUIC + h3) or "tcp,udp" (both, same port).
+  string network = 1;
+}

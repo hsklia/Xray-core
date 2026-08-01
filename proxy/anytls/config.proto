@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package xray.proxy.anytls;
+option csharp_namespace = "Xray.Proxy.Anytls";
+option go_package = "github.com/xtls/xray-core/proxy/anytls";
+option java_package = "com.xray.proxy.anytls";
+option java_multiple_files = true;
+
+import "common/net/address.proto";
+import "common/protocol/user.proto";
+
+message Account {
+  string password = 1;
+}
+
+message Fallback {
+  string name = 1;
+  string alpn = 2;
+  string path = 3;
+  string type = 4;
+  string dest = 5;
+  uint64 xver = 6;
+}
+
+message ServerConfig {
+  repeated xray.common.protocol.User users = 1;
+  // Raw padding scheme, newline separated. Empty means the library default.
+  string padding_scheme = 2;
+  repeated Fallback fallbacks = 3;
+}
+
+message ClientConfig {
+  xray.common.net.IPOrDomain address = 1;
+  uint32 port = 2;
+  string password = 3;
+  string email = 4;
+  int32 level = 5;
+  // Seconds. Zero means the library default.
+  uint32 idle_session_check_interval = 6;
+  // Seconds. Zero means the library default.
+  uint32 idle_session_timeout = 7;
+  int32 min_idle_session = 8;
+  bool disable_reuse = 9;
+}

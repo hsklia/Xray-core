@@ -23,6 +23,7 @@ import (
 	"github.com/xtls/xray-core/transport/internet"
 	"github.com/xtls/xray-core/transport/internet/stat"
 	"github.com/xtls/xray-core/transport/internet/tcp"
+	tuictransport "github.com/xtls/xray-core/transport/internet/tuic"
 	"github.com/xtls/xray-core/transport/internet/udp"
 	"github.com/xtls/xray-core/transport/pipe"
 )
@@ -138,6 +139,15 @@ func (w *tcpWorker) Start() error {
 	if v, ok := w.proxy.(HysteriaInboundValidator); ok {
 		ctx = hyCtx.ContextWithRequireDatagram(ctx, true)
 		ctx = hyCtx.ContextWithValidator(ctx, v.HysteriaInboundValidator())
+	}
+
+	type TUICInbound interface {
+		TUICInboundAuthenticator() tuictransport.Authenticator
+		TUICInboundSettings() tuictransport.ServerSettings
+	}
+	if v, ok := w.proxy.(TUICInbound); ok {
+		ctx = tuictransport.ContextWithAuthenticator(ctx, v.TUICInboundAuthenticator())
+		ctx = tuictransport.ContextWithServerSettings(ctx, v.TUICInboundSettings())
 	}
 
 	hub, err := internet.ListenTCP(ctx, w.address, w.port, w.stream, func(conn stat.Connection) {

@@ -19,6 +19,7 @@ import (
 
 var (
 	inboundConfigLoader = NewJSONConfigLoader(ConfigCreatorCache{
+		"anytls":        func() interface{} { return new(AnyTLSServerConfig) },
 		"tunnel":        func() interface{} { return new(DokodemoConfig) },
 		"dokodemo-door": func() interface{} { return new(DokodemoConfig) },
 		"http":          func() interface{} { return new(HTTPServerConfig) },
@@ -30,10 +31,13 @@ var (
 		"trojan":        func() interface{} { return new(TrojanServerConfig) },
 		"wireguard":     func() interface{} { return &WireGuardConfig{IsClient: false} },
 		"hysteria":      func() interface{} { return new(HysteriaServerConfig) },
+		"tuic":          func() interface{} { return new(TuicServerConfig) },
+		"naive":         func() interface{} { return new(NaiveServerConfig) },
 		"tun":           func() interface{} { return new(TunConfig) },
 	}, "protocol", "settings")
 
 	outboundConfigLoader = NewJSONConfigLoader(ConfigCreatorCache{
+		"anytls":      func() interface{} { return new(AnyTLSClientConfig) },
 		"block":       func() interface{} { return new(BlackholeConfig) },
 		"blackhole":   func() interface{} { return new(BlackholeConfig) },
 		"loopback":    func() interface{} { return new(LoopbackConfig) },
@@ -46,6 +50,8 @@ var (
 		"vmess":       func() interface{} { return new(VMessOutboundConfig) },
 		"trojan":      func() interface{} { return new(TrojanClientConfig) },
 		"hysteria":    func() interface{} { return new(HysteriaClientConfig) },
+		"tuic":        func() interface{} { return new(TuicClientConfig) },
+		"naive":       func() interface{} { return new(NaiveClientConfig) },
 		"dns":         func() interface{} { return new(DNSOutboundConfig) },
 		"wireguard":   func() interface{} { return &WireGuardConfig{IsClient: true} },
 	}, "protocol", "settings")
@@ -197,6 +203,7 @@ func (c *InboundDetourConfig) Build() (*core.InboundHandlerConfig, error) {
 	if dokodemoConfig, ok := rawConfig.(*DokodemoConfig); ok {
 		receiverSettings.ReceiveOriginalDestination = dokodemoConfig.FollowRedirect
 	}
+	NormalizeNaiveInboundStream(rawConfig, receiverSettings)
 	ts, err := rawConfig.(Buildable).Build()
 	if err != nil {
 		return nil, errors.New("failed to build inbound handler for protocol ", c.Protocol).Base(err)
@@ -323,6 +330,7 @@ func (c *OutboundDetourConfig) Build() (*core.OutboundHandlerConfig, error) {
 	if err != nil {
 		return nil, errors.New("failed to load outbound detour config for protocol ", c.Protocol).Base(err)
 	}
+	NormalizeNaiveOutboundStream(rawConfig, senderSettings)
 	ts, err := rawConfig.(Buildable).Build()
 	if err != nil {
 		return nil, errors.New("failed to build outbound handler for protocol ", c.Protocol).Base(err)

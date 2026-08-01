@@ -3,7 +3,8 @@ module github.com/xtls/xray-core
 go 1.26
 
 require (
-	github.com/apernet/quic-go v0.59.1-0.20260330051153-c402ee641eb6
+	github.com/anytls/sing-anytls v0.0.13
+	github.com/apernet/quic-go v0.59.1-0.20260425001925-6c6cc9bcb716
 	github.com/cloudflare/circl v1.6.3
 	github.com/ghodss/yaml v1.0.1-0.20220118164431-d8423dcdf344
 	github.com/golang/mock v1.7.0-rc.1
@@ -14,7 +15,7 @@ require (
 	github.com/pelletier/go-toml v1.9.5
 	github.com/pires/go-proxyproto v0.12.0
 	github.com/refraction-networking/utls v1.8.3-0.20260301010127-aa6edf4b11af
-	github.com/sagernet/sing v0.5.1
+	github.com/sagernet/sing v0.6.1
 	github.com/sagernet/sing-shadowsocks v0.2.7
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1

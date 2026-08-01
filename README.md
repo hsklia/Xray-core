@@ -46,6 +46,39 @@ with existing legacy-reverse configs.
   restart. The file lists, per account, the download/upload rates, the IP cap,
   and the strategy; the managing panel (vpn-ui) rewrites it on any change.
 
+- **AnyTLS, inbound and outbound.**
+  TLS-framed multiplexed proxy with a configurable padding scheme over the first
+  records of a session, which is the part a censor can measure without decrypting
+  anything. UDP is carried inside the same TLS session (UDP-over-TCP), so no
+  second listener is involved. Built on
+  [`anytls/sing-anytls`](https://github.com/anytls/sing-anytls).
+  (`proxy/anytls/`, `infra/conf/anytls.go`)
+
+- **TUIC v5, inbound and outbound.**
+  QUIC-based, with both UDP relay carriers: `native` (one QUIC datagram per
+  packet) and `quic` (a unidirectional stream per packet), plus UDP-over-stream.
+  Congestion control is selectable per listener (cubic, BBR, New Reno). The
+  server pins the `h3` ALPN, which is what makes it indistinguishable from HTTP/3.
+  (`proxy/tuic/`, `transport/internet/tuic/`, `infra/conf/tuic.go`)
+
+- **NaiveProxy, inbound and outbound.**
+  HTTP CONNECT over HTTP/2 (TCP) and HTTP/3 (QUIC), with the reference client's
+  Variant1 padding on the first frames in each direction and the
+  `-connect-authority` header shape Cronet sends. Anything arriving without valid
+  credentials is served a masquerade site (404, static files, reverse proxy or a
+  fixed body), so the port answers a probe like an ordinary web server. Accounts
+  carry their own Basic-auth `username`; when it is absent the account email is
+  used, which is how accounts predating the field keep working.
+  (`proxy/naive/`, `transport/internet/naive/`, `infra/conf/naive.go`)
+
+  All three keep the account email as the identity handed to the dispatcher, so
+  per-account statistics, the speed limiter, the IP limiter and online detection
+  apply to them exactly as they do to the built-in protocols. A client the core
+  cannot use (a duplicate credential, a colon in a Basic username, a missing
+  password) is dropped with a warning rather than failing the build, because an
+  error there makes Xray refuse the whole config and take every unrelated inbound
+  on the host down with it.
+
 ## In short
 
 This is a patched build of Xray-core, pinned to a version that still supports
@@ -55,6 +88,12 @@ per-account IP limit (both keyed by email and driven by a hot-reloaded
 method` error for Shadowsocks inbounds: users defined without their own `method`
 inherit the inbound's server-level cipher, so a valid Shadowsocks inbound config
 works out of the box.
+
+It also adds three protocols upstream does not carry, AnyTLS, TUIC v5 and
+NaiveProxy, each as both an inbound and an outbound, and each wired through the
+same dispatcher seam as the built-in protocols so they inherit per-account
+statistics, speed limiting, IP limiting and online detection rather than needing
+a second core alongside this one.
 
 ## One-line Compilation
 
