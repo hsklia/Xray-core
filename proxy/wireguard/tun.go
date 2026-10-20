@@ -37,9 +37,21 @@ type promiscuousModeHandler func(dest net.Destination, conn net.Conn)
 
 type Tunnel interface {
 	BuildDevice(ipc string, bind conn.Bind) error
+	IpcSet(ipc string) error
 	DialContextTCPAddrPort(ctx context.Context, addr netip.AddrPort) (net.Conn, error)
 	DialUDPAddrPort(laddr, raddr netip.AddrPort) (net.Conn, error)
 	Close() error
+}
+
+// IpcSet updates the existing device. It must not rebuild the TUN or change its
+// state: either operation would interrupt unrelated peers and their sessions.
+func (t *tunnel) IpcSet(ipc string) error {
+	t.rw.Lock()
+	defer t.rw.Unlock()
+	if t.device == nil {
+		return errors.New("WireGuard device is closed")
+	}
+	return t.device.IpcSet(ipc)
 }
 
 type tunnel struct {

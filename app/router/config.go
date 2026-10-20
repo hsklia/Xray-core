@@ -68,7 +68,11 @@ func (rr *RoutingRule) BuildCondition() (Condition, error) {
 	if len(rr.Attributes) > 0 {
 		configuredKeys := make(map[string]*regexp.Regexp)
 		for key, value := range rr.Attributes {
-			configuredKeys[strings.ToLower(key)] = regexp.MustCompile(value)
+			pattern, err := regexp.Compile(value)
+			if err != nil {
+				return nil, errors.New("invalid attribute pattern for ", key).Base(err)
+			}
+			configuredKeys[strings.ToLower(key)] = pattern
 		}
 		conds.Add(&AttributeMatcher{configuredKeys})
 	}
