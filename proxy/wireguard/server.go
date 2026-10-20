@@ -2,12 +2,18 @@ package wireguard
 
 import (
 	"context"
+	"crypto/ecdh"
+	"encoding/hex"
+	"fmt"
+	"strings"
+	"sync"
 
 	"github.com/xtls/xray-core/common/buf"
 	c "github.com/xtls/xray-core/common/ctx"
 	"github.com/xtls/xray-core/common/errors"
 	"github.com/xtls/xray-core/common/log"
 	"github.com/xtls/xray-core/common/net"
+	"github.com/xtls/xray-core/common/protocol"
 	"github.com/xtls/xray-core/common/session"
 	"github.com/xtls/xray-core/core"
 	"github.com/xtls/xray-core/features/dns"
@@ -21,6 +27,12 @@ var nullDestination = net.TCPDestination(net.AnyIP, 0)
 
 type Server struct {
 	bindServer *netBindServer
+	net        Tunnel
+	usersMu    sync.RWMutex
+	users      map[string]*protocol.MemoryUser
+	peers      map[string]*MemoryAccount
+	ambiguous  map[string]bool
+	publicKey  string
 
 	info          routingInfo
 	policyManager policy.Manager
@@ -65,8 +77,179 @@ func NewServer(ctx context.Context, conf *DeviceConfig) (*Server, error) {
 		_ = tun.Close()
 		return nil, err
 	}
+	server.net = tun
+	server.users = make(map[string]*protocol.MemoryUser)
+	server.peers = make(map[string]*MemoryAccount, len(conf.Peers))
+	server.ambiguous = make(map[string]bool)
+	for _, peer := range conf.Peers {
+		a := configuredPeerAccount(peer)
+		if previous := server.peers[a.peer.PublicKey]; previous != nil {
+			// Repeated static entries append routes in UAPI. Reserve all of them
+			// but do not pretend their final entry describes the effective peer:
+			// earlier omitted keys/keepalive settings remain active in UAPI.
+			a.prefixes = append(a.prefixes, previous.prefixes...)
+			server.ambiguous[a.peer.PublicKey] = true
+		}
+		server.peers[a.peer.PublicKey] = a
+	}
+	if key, err := hex.DecodeString(conf.SecretKey); err == nil {
+		if private, err := ecdh.X25519().NewPrivateKey(key); err == nil {
+			server.publicKey = hex.EncodeToString(private.PublicKey().Bytes())
+		}
+	}
 
 	return server, nil
+}
+
+// AddUser changes only a new peer. Rewriting an existing peer's preshared key,
+// allowed IPs or endpoint can reset its live session, so conflicting retries are
+// refused and identical retries do not touch the device at all.
+func (s *Server) AddUser(ctx context.Context, user *protocol.MemoryUser) error {
+	if user == nil || strings.TrimSpace(user.Email) == "" {
+		return fmt.Errorf("WireGuard user email is required")
+	}
+	account, ok := user.Account.(*MemoryAccount)
+	if !ok || account == nil || account.peer == nil {
+		return fmt.Errorf("invalid WireGuard account")
+	}
+	if account.peer.Endpoint != "" {
+		return fmt.Errorf("live WireGuard inbound peers must not set an endpoint")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.net == nil {
+		return fmt.Errorf("WireGuard device is closed")
+	}
+	if account.peer.PublicKey == s.publicKey {
+		return fmt.Errorf("WireGuard peer cannot use the server public key")
+	}
+	if s.ambiguous[account.peer.PublicKey] {
+		return fmt.Errorf("WireGuard public key has multiple static configurations and cannot be adopted safely")
+	}
+	if existing := s.users[user.Email]; existing != nil {
+		if existing.Account.Equals(account) && existing.Level == user.Level {
+			return nil
+		}
+		return fmt.Errorf("WireGuard email already belongs to a different account")
+	}
+	for email, existing := range s.users {
+		if existing.Account.(*MemoryAccount).peer.PublicKey == account.peer.PublicKey && email != user.Email {
+			return fmt.Errorf("WireGuard public key already belongs to another account")
+		}
+	}
+	if existing := s.peers[account.peer.PublicKey]; existing != nil {
+		if !existing.Equals(account) {
+			return fmt.Errorf("WireGuard public key already has a different configuration")
+		}
+		// A restart loaded this persisted peer without its management email. Adopt
+		// it without applying any UAPI update to its active handshake state.
+	} else {
+		for _, existing := range s.peers {
+			for _, current := range existing.prefixes {
+				for _, next := range account.prefixes {
+					if current.Overlaps(next) {
+						return fmt.Errorf("WireGuard allowed IP overlaps an existing peer")
+					}
+				}
+			}
+		}
+		var ipc strings.Builder
+		fmt.Fprintf(&ipc, "public_key=%s\n", account.peer.PublicKey)
+		if account.peer.PreSharedKey != "" {
+			fmt.Fprintf(&ipc, "preshared_key=%s\n", account.peer.PreSharedKey)
+		}
+		for _, prefix := range account.peer.AllowedIps {
+			fmt.Fprintf(&ipc, "allowed_ip=%s\n", prefix)
+		}
+		fmt.Fprintf(&ipc, "persistent_keepalive_interval=%d\n", account.peer.KeepAlive)
+		if err := s.net.IpcSet(ipc.String()); err != nil {
+			// UAPI is incremental rather than transactional. Only this previously
+			// absent key may have been created, so cleanup cannot touch old peers.
+			if cleanup := s.net.IpcSet("public_key=" + account.peer.PublicKey + "\nremove=true\n"); cleanup != nil {
+				return fmt.Errorf("adding WireGuard peer failed: %w; cleanup failed: %v", err, cleanup)
+			}
+			return err
+		}
+		s.peers[account.peer.PublicKey] = account
+	}
+	copy := *user
+	s.users[user.Email] = &copy
+	return nil
+}
+
+func (s *Server) RemoveUser(ctx context.Context, email string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.net == nil {
+		return fmt.Errorf("WireGuard device is closed")
+	}
+	user := s.users[email]
+	if user == nil {
+		// Initial peers have no email in this older protobuf. Claiming success
+		// before they have been adopted would leave a revoked persisted key live
+		// and suppress the caller's legacy error handling after a core restart.
+		return fmt.Errorf("WireGuard user is unknown or has not been adopted")
+	}
+	key := user.Account.(*MemoryAccount).peer.PublicKey
+	if err := s.net.IpcSet("public_key=" + key + "\nremove=true\n"); err != nil {
+		return err
+	}
+	delete(s.users, email)
+	delete(s.peers, key)
+	return nil
+}
+
+func (s *Server) GetUser(_ context.Context, email string) *protocol.MemoryUser {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	if user := s.users[email]; user != nil {
+		copy := *user
+		return &copy
+	}
+	return nil
+}
+
+func (s *Server) GetUsers(_ context.Context) []*protocol.MemoryUser {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	users := make([]*protocol.MemoryUser, 0, len(s.users))
+	for _, user := range s.users {
+		copy := *user
+		users = append(users, &copy)
+	}
+	return users
+}
+
+func (s *Server) GetUsersCount(context.Context) int64 {
+	s.usersMu.RLock()
+	defer s.usersMu.RUnlock()
+	return int64(len(s.users))
+}
+
+func (s *Server) Close() error {
+	s.usersMu.Lock()
+	defer s.usersMu.Unlock()
+	if s.net == nil {
+		return nil
+	}
+	err := s.net.Close()
+	s.net = nil
+	s.users = nil
+	s.peers = nil
+	s.ambiguous = nil
+	return err
 }
 
 // Network implements proxy.Inbound.

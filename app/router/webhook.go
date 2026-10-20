@@ -89,6 +89,8 @@ type WebhookNotifier struct {
 	done          chan struct{}
 	wg            sync.WaitGroup
 	closeOnce     sync.Once
+	lifecycle     sync.Mutex // orders Fire's WaitGroup.Add before Close's Wait
+	closed        bool
 }
 
 func NewWebhookNotifier(cfg *WebhookConfig) (*WebhookNotifier, error) {
@@ -142,13 +144,13 @@ func (h *WebhookNotifier) Fire(ctx routing.Context, outboundTag string) {
 		return
 	}
 
-	h.wg.Add(1)
-	select {
-	case <-h.done:
-		h.wg.Done()
+	h.lifecycle.Lock()
+	if h.closed {
+		h.lifecycle.Unlock()
 		return
-	default:
 	}
+	h.wg.Add(1)
+	h.lifecycle.Unlock()
 	go func() {
 		defer h.wg.Done()
 		h.post(ev)
@@ -279,7 +281,10 @@ func (h *WebhookNotifier) cleanupLoop() {
 
 func (h *WebhookNotifier) Close() error {
 	h.closeOnce.Do(func() {
+		h.lifecycle.Lock()
+		h.closed = true
 		close(h.done)
+		h.lifecycle.Unlock()
 	})
 	h.wg.Wait()
 	h.client.CloseIdleConnections()
